@@ -49,14 +49,13 @@ export default {
         else if (hasImage) model = "gpt-4o";
         else if (chatHistory.length >= 12) model = "gpt-4o";
 
-        // Build input parts (Responses API: input_text / input_image + image_url)
-        const parts = [];
-        if (text.trim()) parts.push({ type: "input_text", text: text.slice(0, 8000) });
-        for (const d of images) {
-          // d = dataURL эсвэл HTTPS url аль нь ч байж болно
-          parts.push({ type: "input_image", image_url: { url: d } });
-        }
-
+// Build input parts
+const parts = [];
+if (text.trim()) parts.push({ type: "input_text", text: text.slice(0, 8000) });
+// ⬇️ ЗӨВ ХУВИЛБАР: image_url нь ШУУД string
+for (const d of images) {
+  parts.push({ type: "input_image", image_url: d });
+}
         const r = await fetch("https://api.openai.com/v1/responses", {
           method: "POST",
           headers: {
