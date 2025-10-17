@@ -1,63 +1,92 @@
+// src/worker.js
 export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-
-    // CORS
-    const cors = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+  async fetch(request, env) {
+    const ORIGIN = request.headers.get("Origin") || "";
+    const ALLOW = [
+      "https://chat.oyunsanaa.com",
+      "https://oyunsanaa-chatbox-wix.pages.dev",
+    ];
+    const allow = ALLOW.includes(ORIGIN) ? ORIGIN : "*";
+    const cors = (extra = {}) => ({
+      "Access-Control-Allow-Origin": allow,
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    };
+      "Access-Control-Max-Age": "86400",
+      "Vary": "Origin",
+      ...extra,
+    });
+
+    // CORS preflight
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: cors });
+      return new Response(null, { status: 204, headers: cors() });
     }
 
-    if (url.pathname === "/api/chat" && request.method === "POST") {
-      try {
-        const { text = "", images = [], chatHistory = [], userLang = "mn" } =
-          await request.json().catch(() => ({}));
+    const url = new URL(request.url);
 
-        // OpenAI Responses API (JSON mode)
+    // Health
+    if (url.pathname === "/health") {
+      return Response.json({ ok: true, ts: Date.now() }, { headers: cors() });
+    }
+
+    // --- MAIN CHAT ENDPOINT ---
+    if (url.pathname === "/v1/chat" && request.method === "POST") {
+      try {
+        const {
+          text = "",
+          images = [],            // array of dataURLs
+          chatHistory = [],
+          userLang = "mn",
+          forceModel = "",        // 'gpt-4o' | 'gpt-4o-mini'
+          maxOutput = 700,
+        } = await request.json().catch(() => ({}));
+
+        const hasImage = Array.isArray(images) && images.length > 0;
+        let model = "gpt-4o-mini";
+        if (forceModel) model = forceModel;
+        else if (hasImage) model = "gpt-4o";
+        else if (Array.isArray(chatHistory) && chatHistory.length >= 12) model = "gpt-4o";
+
+        const parts = [];
+        if (text?.trim()) parts.push({ type: "text", text: text.slice(0, 8000) });
+        if (hasImage) for (const d of images) parts.push({ type: "input_image", image_data: d });
+
         const r = await fetch("https://api.openai.com/v1/responses", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+            "Authorization": `Bearer ${env.OPENAI_API_KEY}`,
           },
           body: JSON.stringify({
-            model: "gpt-4o-mini",
-            input: [
-              { role: "system", content: `You are OY Assistant. lang=${userLang}` },
-              ...chatHistory,
-              {
-                role: "user",
-                content: images.length
-                  ? [{ type: "input_text", text }, ...images.map(d => ({ type: "input_image", image_url: d }))]
-                  : [{ type: "input_text", text }],
-              },
-            ],
-            response_format: { type: "text" },
+            model,
+            input: [{ role: "user", content: parts }],
+            max_output_tokens: maxOutput,
+            metadata: { app: "oyunsanaa-chat", userLang },
           }),
         });
 
-        const j = await r.json();
-        const reply =
-          j?.output_text ||
-          j?.content?.[0]?.text ||
-          j?.message ||
-          "…";
+        if (!r.ok) {
+          return Response.json(
+            { ok: false, error: "OPENAI_ERROR", detail: await r.text() },
+            { status: 502, headers: cors({ "Content-Type": "application/json" }) }
+          );
+        }
 
-        return new Response(JSON.stringify({ reply }), {
-          headers: { "Content-Type": "application/json", ...cors },
-        });
+        const data = await r.json();
+        const reply = data?.output?.[0]?.content?.[0]?.text ?? "";
+
+        return Response.json(
+          { ok: true, model, output: [{ role: "assistant", content: [{ type: "text", text: reply }]}] },
+          { headers: cors({ "Content-Type": "application/json" }) }
+        );
       } catch (e) {
-        return new Response(
-          JSON.stringify({ reply: "⚠️ Серверт алдаа гарлаа." }),
-          { status: 500, headers: { "Content-Type": "application/json", ...cors } }
+        return Response.json(
+          { ok: false, error: "SERVER_ERROR", detail: String(e) },
+          { status: 500, headers: cors({ "Content-Type": "application/json" }) }
         );
       }
     }
 
-    return new Response("OK", { headers: cors });
-  },
+    // Not found / wrong method
+    return new Response("Not Found", { status: 404, headers: cors() });
+  }
 };
