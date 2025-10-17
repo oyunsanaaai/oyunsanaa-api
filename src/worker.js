@@ -49,10 +49,13 @@ export default {
         else if (hasImage) model = "gpt-4o";
         else if (chatHistory.length >= 12) model = "gpt-4o";
 
-        // Build input parts (Responses API expects input_text / input_image)
+        // Build input parts (Responses API: input_text / input_image + image_url)
         const parts = [];
         if (text.trim()) parts.push({ type: "input_text", text: text.slice(0, 8000) });
-        for (const d of images) parts.push({ type: "input_image", image_data: d });
+        for (const d of images) {
+          // d = dataURL эсвэл HTTPS url аль нь ч байж болно
+          parts.push({ type: "input_image", image_url: { url: d } });
+        }
 
         const r = await fetch("https://api.openai.com/v1/responses", {
           method: "POST",
@@ -81,7 +84,6 @@ export default {
           (out.find(c => c.type === "output_text")?.text) ??
           (out[0]?.text) ?? "";
 
-        // Return in the shape your UI expects
         return new Response(
           JSON.stringify({
             ok: true,
