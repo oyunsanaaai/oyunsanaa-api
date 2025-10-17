@@ -47,7 +47,8 @@ export default {
         else if (Array.isArray(chatHistory) && chatHistory.length >= 12) model = "gpt-4o";
 
         const parts = [];
-        if (text?.trim()) parts.push({ type: "text", text: text.slice(0, 8000) });
+       - if (text?.trim()) parts.push({ type: "text", text: text.slice(0, 8000) });
++ if (text?.trim()) parts.push({ type: "input_text", text: text.slice(0, 8000) });
         if (hasImage) for (const d of images) parts.push({ type: "input_image", image_data: d });
 
         const r = await fetch("https://api.openai.com/v1/responses", {
@@ -72,7 +73,11 @@ export default {
         }
 
         const data = await r.json();
-        const reply = data?.output?.[0]?.content?.[0]?.text ?? "";
+      - const reply = data?.output?.[0]?.content?.[0]?.text ?? "";
++ const out = data?.output?.[0]?.content || [];
++ const reply =
++   (out.find(c => c.type === "output_text")?.text) ??
++   (out[0]?.text) ?? "";
 
         return Response.json(
           { ok: true, model, output: [{ role: "assistant", content: [{ type: "text", text: reply }]}] },
