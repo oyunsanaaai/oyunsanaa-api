@@ -1,14 +1,11 @@
-// src/worker.js
+// src/worker.js — dynamic model select (4o vs 4o-mini) + vision OK
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // --- CORS helper ---
+    // --- CORS ---
     const origin = request.headers.get("Origin") || "";
-    const allow = [
-      "https://chat.oyunsanaa.com",
-      "https://oyunsanaa-chatbox-wix.pages.dev",
-    ];
+    const allow = ["https://chat.oyunsanaa.com", "https://oyunsanaa-chatbox-wix.pages.dev"];
     const allowOrigin = allow.includes(origin) ? origin : "*";
     const cors = (extra = {}) => ({
       "Access-Control-Allow-Origin": allowOrigin,
@@ -19,7 +16,6 @@ export default {
       ...extra,
     });
 
-    // Preflight
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: cors() });
     }
@@ -31,7 +27,7 @@ export default {
       });
     }
 
-    // Chat endpoint
+    // Chat
     if (url.pathname === "/v1/chat" && request.method === "POST") {
       try {
         const body = await request.json().catch(() => ({}));
@@ -39,23 +35,24 @@ export default {
         const images = Array.isArray(body.images) ? body.images : [];
         const chatHistory = Array.isArray(body.chatHistory) ? body.chatHistory : [];
         const userLang = (body.userLang || "mn").split("-")[0];
-        const forceModel = body.forceModel || "";
+        const forceModel = body.forceModel || ""; // <-- override боломж
         const maxOutput = body.maxOutput || 800;
 
-        // Model selection
+        // === МОДЕЛЬ СОНГОХ ЛОГИК ===
         const hasImage = images.length > 0;
         let model = "gpt-4o-mini";
         if (forceModel) model = forceModel;
         else if (hasImage) model = "gpt-4o";
-        else if (chatHistory.length >= 12) model = "gpt-4o";
+        else if (chatHistory.length >= 12) model = "gpt-4o"; // урт/гүн ярианд 4o
 
-// Build input parts
-const parts = [];
-if (text.trim()) parts.push({ type: "input_text", text: text.slice(0, 8000) });
-// ⬇️ ЗӨВ ХУВИЛБАР: image_url нь ШУУД string
-for (const d of images) {
-  parts.push({ type: "input_image", image_url: d });
-}
+        // === Responses API content ===
+        const parts = [];
+        if (text.trim()) parts.push({ type: "input_text", text: text.slice(0, 8000) });
+        for (const d of images) {
+          // d нь dataURL эсвэл https URL байж болно
+          parts.push({ type: "input_image", image_url: d });
+        }
+
         const r = await fetch("https://api.openai.com/v1/responses", {
           method: "POST",
           headers: {
@@ -78,18 +75,16 @@ for (const d of images) {
         }
 
         const data = await r.json();
-        const out = (data?.output?.[0]?.content) || [];
+        const out = data?.output?.[0]?.content || [];
         const reply =
-          (out.find(c => c.type === "output_text")?.text) ??
-          (out[0]?.text) ?? "";
+          (out.find(x => x.type === "output_text")?.text) ??
+          (out[0]?.text) ?? "…";
 
         return new Response(
           JSON.stringify({
             ok: true,
             model,
-            output: [
-              { role: "assistant", content: [{ type: "text", text: reply }] }
-            ],
+            output: [{ role: "assistant", content: [{ type: "text", text: reply }]}],
           }),
           { headers: cors({ "Content-Type": "application/json" }) }
         );
@@ -101,7 +96,6 @@ for (const d of images) {
       }
     }
 
-    // Fallback
     return new Response("Not Found", { status: 404, headers: cors() });
   }
 };
